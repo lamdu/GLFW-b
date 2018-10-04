@@ -619,6 +619,7 @@ windowHint wh =
       (WindowHint'Resizable              x) -> (c'GLFW_RESIZABLE,                toC x)
       (WindowHint'Visible                x) -> (c'GLFW_VISIBLE,                  toC x)
       (WindowHint'Decorated              x) -> (c'GLFW_DECORATED,                toC x)
+      (WindowHint'TransparentFrameBuffer x) -> (c'GLFW_TRANSPARENT_FRAMEBUFFER,  toC x)
       (WindowHint'RedBits                x) -> (c'GLFW_RED_BITS,                 toC x)
       (WindowHint'GreenBits              x) -> (c'GLFW_GREEN_BITS,               toC x)
       (WindowHint'BlueBits               x) -> (c'GLFW_BLUE_BITS,                toC x)

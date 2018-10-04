@@ -139,6 +139,7 @@ data WindowHint =
     WindowHint'Resizable              !Bool
   | WindowHint'Visible                !Bool
   | WindowHint'Decorated              !Bool
+  | WindowHint'TransparentFrameBuffer !Bool
   | WindowHint'RedBits                !(Maybe Int)
   | WindowHint'GreenBits              !(Maybe Int)
   | WindowHint'BlueBits               !(Maybe Int)
