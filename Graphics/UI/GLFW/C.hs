@@ -12,7 +12,7 @@ module Graphics.UI.GLFW.C where
 
 import Data.Bits       ((.&.))
 import Data.Char       (chr, ord)
-import Foreign.C.Types (CDouble, CFloat, CInt, CUChar, CUInt, CUShort)
+import Foreign.C.Types (CBool, CDouble, CFloat, CInt, CUChar, CUInt, CUShort)
 import Foreign.Ptr     (Ptr)
 
 import Bindings.GLFW
@@ -106,6 +106,13 @@ instance C CInt StandardCursorShape where
   toC  StandardCursorShape'VResize   = c'GLFW_VRESIZE_CURSOR
 
 --------------------------------------------------------------------------------
+
+instance C CBool Bool where
+  fromC v
+    | v == 0 = False
+    | otherwise = True
+  toC False = 0
+  toC True = 1
 
 instance C CInt Bool where
   fromC v

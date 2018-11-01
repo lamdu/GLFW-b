@@ -217,17 +217,19 @@ module Graphics.UI.GLFW
 
 import Prelude hiding (init)
 
-import Control.Monad         (when, liftM)
-import Data.IORef            (IORef, atomicModifyIORef, newIORef, readIORef)
+import Control.Exception     (SomeException, throwIO, handle)
+import Control.Monad         (when, liftM, join)
+import Data.IORef            (IORef, atomicModifyIORef, atomicModifyIORef', newIORef, readIORef)
 import Data.Word             (Word32, Word64)
 import Foreign.C.String      (peekCString, withCString, CString)
-import Foreign.C.Types       (CUInt, CUShort)
+import Foreign.C.Types       (CUInt, CUShort, CBool)
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
 import Foreign.Marshal.Array (advancePtr, allocaArray, peekArray, withArray)
 import Foreign.Ptr           (FunPtr, freeHaskellFunPtr, nullFunPtr, nullPtr
                              ,Ptr)
 import Foreign.StablePtr
 import Foreign.Storable      (Storable (..))
+import System.IO             (hPutStrLn, stderr)
 import System.IO.Unsafe      (unsafePerformIO)
 
 import Graphics.UI.GLFW.C
@@ -318,7 +320,9 @@ type CursorEnterCallback     = Window -> CursorState                            
 -- | Fires when the user scrolls the mouse wheel or via touch gesture.
 type ScrollCallback          = Window -> Double -> Double                                -> IO ()
 -- | Fires for each press or repeat of keyboard keys (regardless of if it has textual meaning or not, eg Shift)
-type KeyCallback             = Window -> Key -> Int -> KeyState -> ModifierKeys          -> IO ()
+--
+-- Should returns wheteher key was handled
+type KeyCallback             = Window -> Key -> Int -> KeyState -> ModifierKeys          -> IO Bool
 -- | Fires when a complete character codepoint is typed by the user, Shift then 'b' generates "B".
 type CharCallback            = Window -> Char                                            -> IO ()
 -- | Similar to 'CharCallback', fires when a complete unicode codepoint is typed by the user.
@@ -333,56 +337,29 @@ type JoystickCallback        = Joystick -> JoystickState                        
 --------------------------------------------------------------------------------
 -- CB scheduling
 
-data ScheduledCallbacks = ScheduledCallbacks
-  { _forward :: [IO ()] -- Execution iterates this list
-  , _backward :: [IO ()] -- New schedules prepend here
-  }
-
-storedScheduledCallbacks :: IORef ScheduledCallbacks
-storedScheduledCallbacks = unsafePerformIO . newIORef $ ScheduledCallbacks [] []
+-- We mustn't throw exceptions at the C side from our callbacks. So
+-- instead of remember the first exception and throw that
+storedException :: IORef (Maybe SomeException)
+storedException = unsafePerformIO $ newIORef Nothing
 
 -- This NOINLINE pragma is due to use of unsafePerformIO.
 -- See http://hackage.haskell.org/packages/archive/base/latest/doc/html/System-IO-Unsafe.html#v:unsafePerformIO .
 
-{-# NOINLINE storedScheduledCallbacks #-}
+{-# NOINLINE storedException #-}
 
--- This is provided in newer "base" versions. To avoid depending on
--- it, it's reimplemented here. Should remove if/when compatibility
--- with older base is not an issue:
-atomicModifyIORef' :: IORef a -> (a -> (a,b)) -> IO b
-atomicModifyIORef' ref f = do
-    b <- atomicModifyIORef ref
-            (\x -> let (a, b) = f x
-                    in (a, a `seq` b))
-    b `seq` return b
+storeException :: SomeException -> IO ()
+storeException exc =
+    join $ atomicModifyIORef' storedException $
+    \e -> case e of
+    Nothing -> (Just exc, pure ())
+    Just _ -> (e, warn)
+    where
+        warn = hPutStrLn stderr $ "Multiple exceptions in multiple callbacks. Ignoring: " ++ show exc
 
-schedule :: IO () -> IO ()
-schedule act =
-  atomicModifyIORef' storedScheduledCallbacks $
-  \(ScheduledCallbacks oldForward oldBackward) ->
-  (ScheduledCallbacks oldForward (act : oldBackward), ())
-
-splitFirst :: [a] -> (Maybe a, [a])
-splitFirst [] = (Nothing, [])
-splitFirst (x:xs) = (Just x, xs)
-
-getNextScheduled :: IO (Maybe (IO ()))
-getNextScheduled =
-  atomicModifyIORef storedScheduledCallbacks $
-  \(ScheduledCallbacks oldForward oldBackward) ->
-  case oldForward of
-    [] ->
-      let (mCb, newForward) = splitFirst (reverse oldBackward)
-      in (ScheduledCallbacks newForward [], mCb)
-    (cb:rest) ->                -- Eat forward first
-      (ScheduledCallbacks rest oldBackward, Just cb)
-
-executeScheduled :: IO ()
-executeScheduled = do
-  mcb <- getNextScheduled
-  case mcb of
-    Nothing -> return ()
-    Just cb -> cb >> executeScheduled
+throwStoredExceptions :: IO ()
+throwStoredExceptions =
+    -- extract the exception and throw it
+    join $ atomicModifyIORef storedException $ \e -> (Nothing, foldMap throwIO e)
 
 --------------------------------------------------------------------------------
 -- Error handling
@@ -394,7 +371,7 @@ setErrorCallback = setCallback
     mk'GLFWerrorfun
     (\cb a0 a1 -> do
         s <- peekCString a1
-        schedule $ cb (fromC a0) s)
+        handle storeException $ cb (fromC a0) s)
     c'glfwSetErrorCallback
     storedErrorFun
 
@@ -520,7 +497,7 @@ getMonitorName mon = do
 setMonitorCallback :: Maybe MonitorCallback -> IO ()
 setMonitorCallback = setCallback
     mk'GLFWmonitorfun
-    (\cb a0 a1 -> schedule $ cb (fromC a0) (fromC a1))
+    (\cb a0 a1 -> handle storeException $ cb (fromC a0) (fromC a1))
     c'glfwSetMonitorCallback
     storedMonitorFun
 
@@ -1062,7 +1039,7 @@ setWindowPosCallback :: Window -> Maybe WindowPosCallback -> IO ()
 setWindowPosCallback win = setWindowCallback
     mk'GLFWwindowposfun
     (\cb a0 a1 a2 ->
-      schedule $ cb (fromC a0) (fromC a1) (fromC a2))
+      handle storeException $ cb (fromC a0) (fromC a1) (fromC a2))
     (c'glfwSetWindowPosCallback (toC win))
     storedWindowPosFun
     win
@@ -1073,7 +1050,7 @@ setWindowSizeCallback :: Window -> Maybe WindowSizeCallback -> IO ()
 setWindowSizeCallback win = setWindowCallback
     mk'GLFWwindowsizefun
     (\cb a0 a1 a2 ->
-      schedule $ cb (fromC a0) (fromC a1) (fromC a2))
+      handle storeException $ cb (fromC a0) (fromC a1) (fromC a2))
     (c'glfwSetWindowSizeCallback (toC win))
     storedWindowSizeFun
     win
@@ -1103,7 +1080,7 @@ setWindowRefreshCallback win = setWindowCallback
 setWindowFocusCallback :: Window -> Maybe WindowFocusCallback -> IO ()
 setWindowFocusCallback win = setWindowCallback
     mk'GLFWwindowfocusfun
-    (\cb a0 a1 -> schedule $ cb (fromC a0) (fromC a1))
+    (\cb a0 a1 -> handle storeException $ cb (fromC a0) (fromC a1))
     (c'glfwSetWindowFocusCallback (toC win))
     storedWindowFocusFun
     win
@@ -1113,7 +1090,7 @@ setWindowFocusCallback win = setWindowCallback
 setWindowIconifyCallback :: Window -> Maybe WindowIconifyCallback -> IO ()
 setWindowIconifyCallback win = setWindowCallback
     mk'GLFWwindowiconifyfun
-    (\cb a0 a1 -> schedule $ cb (fromC a0) (fromC a1))
+    (\cb a0 a1 -> handle storeException $ cb (fromC a0) (fromC a1))
     (c'glfwSetWindowIconifyCallback (toC win))
     storedWindowIconifyFun
     win
@@ -1123,7 +1100,7 @@ setWindowIconifyCallback win = setWindowCallback
 setFramebufferSizeCallback :: Window -> Maybe FramebufferSizeCallback -> IO ()
 setFramebufferSizeCallback win = setWindowCallback
     mk'GLFWframebuffersizefun
-    (\cb a0 a1 a2 -> schedule $ cb (fromC a0) (fromC a1) (fromC a2))
+    (\cb a0 a1 a2 -> handle storeException $ cb (fromC a0) (fromC a1) (fromC a2))
     (c'glfwSetFramebufferSizeCallback (toC win))
     storedFramebufferSizeFun
     win
@@ -1132,20 +1109,20 @@ setFramebufferSizeCallback win = setWindowCallback
 -- This is most useful for continual rendering, such as games.
 -- See the <http://www.glfw.org/docs/3.2/input.html#events Event Processing Guide>
 pollEvents :: IO ()
-pollEvents = c'glfwPollEvents >> executeScheduled
+pollEvents = c'glfwPollEvents >> throwStoredExceptions
 
 -- | Waits until at least one event is in the queue then processes the queue and returns.
 -- Requires at least one window to be active for it to sleep. This saves a lot of CPU, and
 -- is better if you're doing only periodic rendering, such as with an editor program.
 -- See the <http://www.glfw.org/docs/3.2/input.html#events Event Processing Guide>
 waitEvents :: IO ()
-waitEvents = c'glfwWaitEvents >> executeScheduled
+waitEvents = c'glfwWaitEvents >> throwStoredExceptions
 
 -- | Same as 'waitEvents', with a timeout after which the function returns.
 -- See the <http://www.glfw.org/docs/3.2/input.html#events Event Processing Guide>
 waitEventsTimeout :: Double -> IO ()
 waitEventsTimeout seconds =
-  c'glfwWaitEventsTimeout (toC seconds) >> executeScheduled
+  c'glfwWaitEventsTimeout (toC seconds) >> throwStoredExceptions
 
 -- | Creates an empty event within the event queue. Can be called from any
 -- thread, so you can use this to wake up the main thread that's using
@@ -1243,7 +1220,9 @@ setKeyCallback :: Window -> Maybe KeyCallback -> IO ()
 setKeyCallback win = setWindowCallback
     mk'GLFWkeyfun
     (\cb a0 a1 a2 a3 a4 ->
-      schedule $ cb (fromC a0) (fromC a1) (fromC a2) (fromC a3) (fromC a4))
+      fmap toC . handle ((True <$) . storeException) $
+      cb (fromC a0) (fromC a1) (fromC a2) (fromC a3) (fromC a4)
+    :: IO CBool)
     (c'glfwSetKeyCallback (toC win))
     storedKeyFun
     win
@@ -1253,7 +1232,7 @@ setKeyCallback win = setWindowCallback
 setCharCallback :: Window -> Maybe CharCallback -> IO ()
 setCharCallback win = setWindowCallback
     mk'GLFWcharfun
-    (\cb a0 a1 -> schedule $ cb (fromC a0) (fromC a1))
+    (\cb a0 a1 -> handle storeException $ cb (fromC a0) (fromC a1))
     (c'glfwSetCharCallback (toC win))
     storedCharFun
     win
@@ -1264,7 +1243,7 @@ setCharCallback win = setWindowCallback
 setCharModsCallback :: Window -> Maybe CharModsCallback -> IO ()
 setCharModsCallback win = setWindowCallback
     mk'GLFWcharmodsfun
-    (\cb a0 a1 a2 -> schedule $ cb (fromC a0) (fromC a1) (fromC a2))
+    (\cb a0 a1 a2 -> handle storeException $ cb (fromC a0) (fromC a1) (fromC a2))
     (c'glfwSetCharModsCallback (toC win))
     storedCharModsFun
     win
@@ -1274,7 +1253,7 @@ setCharModsCallback win = setWindowCallback
 setMouseButtonCallback :: Window -> Maybe MouseButtonCallback -> IO ()
 setMouseButtonCallback win = setWindowCallback
     mk'GLFWmousebuttonfun
-    (\cb a0 a1 a2 a3 -> schedule $ cb (fromC a0) (fromC a1) (fromC a2) (fromC a3))
+    (\cb a0 a1 a2 a3 -> handle storeException $ cb (fromC a0) (fromC a1) (fromC a2) (fromC a3))
     (c'glfwSetMouseButtonCallback (toC win))
     storedMouseButtonFun
     win
@@ -1284,7 +1263,7 @@ setMouseButtonCallback win = setWindowCallback
 setCursorPosCallback :: Window -> Maybe CursorPosCallback -> IO ()
 setCursorPosCallback win = setWindowCallback
     mk'GLFWcursorposfun
-    (\cb a0 a1 a2 -> schedule $ cb (fromC a0) (fromC a1) (fromC a2))
+    (\cb a0 a1 a2 -> handle storeException $ cb (fromC a0) (fromC a1) (fromC a2))
     (c'glfwSetCursorPosCallback (toC win))
     storedCursorPosFun
     win
@@ -1294,7 +1273,7 @@ setCursorPosCallback win = setWindowCallback
 setCursorEnterCallback :: Window -> Maybe CursorEnterCallback -> IO ()
 setCursorEnterCallback win = setWindowCallback
     mk'GLFWcursorenterfun
-    (\cb a0 a1 -> schedule $ cb (fromC a0) (fromC a1))
+    (\cb a0 a1 -> handle storeException $ cb (fromC a0) (fromC a1))
     (c'glfwSetCursorEnterCallback (toC win))
     storedCursorEnterFun
     win
@@ -1304,7 +1283,7 @@ setCursorEnterCallback win = setWindowCallback
 setScrollCallback :: Window -> Maybe ScrollCallback -> IO ()
 setScrollCallback win = setWindowCallback
     mk'GLFWscrollfun
-    (\cb a0 a1 a2 -> schedule $ cb (fromC a0) (fromC a1) (fromC a2))
+    (\cb a0 a1 a2 -> handle storeException $ cb (fromC a0) (fromC a1) (fromC a2))
     (c'glfwSetScrollCallback (toC win))
     storedScrollFun
     win
@@ -1351,7 +1330,7 @@ getJoystickName js = do
 setJoystickCallback :: Maybe JoystickCallback -> IO ()
 setJoystickCallback = setCallback
     mk'GLFWjoystickfun
-    (\cb a0 a1 -> schedule $ cb (fromC a0) (fromC a1))
+    (\cb a0 a1 -> handle storeException $ cb (fromC a0) (fromC a1))
     c'glfwSetJoystickCallback
     storedJoystickFun
 
@@ -1501,7 +1480,7 @@ setDropCallback win = setWindowCallback
             let p = advancePtr fs i
             p' <- peek p
             peekCString p'
-        schedule $ cb (fromC w) fps)
+        handle storeException $ cb (fromC w) fps)
     (c'glfwSetDropCallback (toC win))
     storedDropFun
     win
