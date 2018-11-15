@@ -1,5 +1,5 @@
 name:         GLFW-b
-version:      3.2.1.1
+version:      3.2.1.2
 category:     Graphics
 
 author:       Brian Lewis <brian@lorf.org>
@@ -53,7 +53,7 @@ library
   build-depends:
       base          <  5
     , deepseq       >= 1.1.0.0
-    , bindings-GLFW >= 3.2.1.1
+    , bindings-GLFW >= 3.2.1.2
 
 --------------------------------------------------------------------------------
 
