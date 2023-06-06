@@ -359,7 +359,7 @@ type CursorEnterCallback        = Window -> CursorState                         
 -- | Fires when the user scrolls the mouse wheel or via touch gesture.
 type ScrollCallback             = Window -> Double -> Double                                -> IO ()
 -- | Fires for each press or repeat of keyboard keys (regardless of if it has textual meaning or not, eg Shift)
-type KeyCallback                = Window -> Key -> Int -> KeyState -> ModifierKeys          -> IO ()
+type KeyCallback                = Window -> Key -> Int -> KeyState -> ModifierKeys          -> IO Bool
 -- | Fires when a complete character codepoint is typed by the user, Shift then "b" generates "B".
 type CharCallback               = Window -> Char                                            -> IO ()
 -- | Similar to 'CharCallback', fires when a complete unicode codepoint is typed by the user.
@@ -1479,10 +1479,12 @@ setKeyCallback :: Window -> Maybe KeyCallback -> IO ()
 setKeyCallback win = setWindowCallback
     mk'GLFWkeyfun
     (\cb a0 a1 a2 a3 a4 ->
-      schedule $ cb (fromC a0) (fromC a1) (fromC a2) (fromC a3) (fromC a4))
+      toCBool <$> cb (fromC a0) (fromC a1) (fromC a2) (fromC a3) (fromC a4))
     (c'glfwSetKeyCallback (toC win))
     storedKeyFun
     win
+    where
+      toCBool x = if x then 1 else 0
 
 -- | Sets the callback to use when the user types a character
 -- See <http://www.glfw.org/docs/3.3/group__input.html#ga556239421c6a5a243c66fca28da9f742 glfwSetCharCallback>
