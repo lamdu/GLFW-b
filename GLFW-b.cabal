@@ -1,5 +1,5 @@
 name:         GLFW-b
-version:      3.3.0.0
+version:      3.3.2.1
 category:     Graphics
 
 author:       Brian Lewis <brian@lorf.org>
@@ -54,7 +54,7 @@ library
       base          <  5
     , deepseq       >= 1.1.0.0
     , array         >= 0.5.3.0
-    , bindings-GLFW >= 3.3.0.0
+    , bindings-GLFW >= 3.3.2.1
 
 --------------------------------------------------------------------------------
 

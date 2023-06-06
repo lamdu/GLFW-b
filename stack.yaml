@@ -65,3 +65,7 @@ packages:
 #
 # Allow a newer minor version of GHC than the snapshot specifies
 # compiler-check: newer-minor
+
+extra-deps:
+- github: lamdu/bindings-GLFW
+  commit: 0f7b821b75cb620ccf8fbdda6f1f4912f049c551
