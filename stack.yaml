@@ -15,7 +15,7 @@
 # resolver:
 #  name: custom-snapshot
 #  location: "./custom-snapshot.yaml"
-resolver: lts-20.24
+resolver: lts-23.19
 
 # User packages to be built.
 # Various formats can be used as shown in the example below.
@@ -40,7 +40,8 @@ packages:
 
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)
-# extra-deps: []
+extra-deps:
+- bindings-GLFW-3.3.9.3
 
 # Override default flag values for local packages and extra-deps
 # flags: {}
@@ -68,4 +69,4 @@ packages:
 
 extra-deps:
 - github: lamdu/bindings-GLFW
-  commit: 0f7b821b75cb620ccf8fbdda6f1f4912f049c551
+  commit: 4402c6b6fee81e59f5931fabe1724233cd0ca08c

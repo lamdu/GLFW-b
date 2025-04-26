@@ -1903,8 +1903,8 @@ getNSGLContext :: Window -> IO (Ptr ())
 getNSGLContext = c'glfwGetNSGLContext . toC
 
 -- | See <http://www.glfw.org/docs/3.3/group__native.html#ga8519b66594ea3ef6eeafaa2e3ee37406 glfwGetX11Display>
-getX11Display :: Window -> IO (Ptr display)
-getX11Display = c'glfwGetX11Display . toC
+getX11Display :: IO (Ptr display)
+getX11Display = c'glfwGetX11Display
 
 -- | See <http://www.glfw.org/docs/3.3/group__native.html#ga088fbfa80f50569402b41be71ad66e40 glfwGetX11Adapter>
 getX11Adapter :: Window -> IO Word64
